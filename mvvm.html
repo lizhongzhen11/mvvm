@@ -1,0 +1,36 @@
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>mvvm</title>
+</head>
+<body>
+  <div id="mvvm">
+    <h1>{{title}}</h1>
+    <div>{{a.b}}</div>
+    <div>{{c}}</div>
+    <div>{{d.length}}</div>
+    <div>{{a.e.f}}</div>
+  </div>
+  <script src="./Mvvm.js"></script>
+  <script>
+    let mvvm = new Mvvm3({
+      el: '#mvvm',
+      data: {
+        title: 'Jay',
+        a: {
+          b: 1,
+          e: {}
+        },
+        d: ['ddd', 'dddd'],
+      }
+    })
+    console.log(mvvm)
+    setTimeout(() => {
+      mvvm.data.title = 'lizz'
+      mvvm.data.a.b = 'bbbbbb'
+      mvvm.data.c = 'cccccc'
+      mvvm.data.a.e.f = 'bbbccc'
+    }, 1500)
+  </script>
+</body>
+</html>
