@@ -5,32 +5,35 @@
 </head>
 <body>
   <div id="mvvm">
-    <h1>{{title}}</h1>
-    <div>{{a.b}}</div>
-    <div>{{c}}</div>
-    <div>{{d.length}}</div>
-    <div>{{a.e.f}}</div>
+    <h1>我乃{{title}}</h1>
+    <h2>{{title}}</h1>
+    <div>武器：{{a.b}}</div>
+    <div>宠物：{{c}}</div>
+    <div>朋友：{{d.length}}</div>
+    <div>功法：{{a.e.f}}</div>
+    <div>{{title}}{{c}}</div>
+    <input type="text" v-model="title">
   </div>
   <script src="./Mvvm.js"></script>
   <script>
-    let mvvm = new Mvvm3({
+    let mvvm = new Mvvm({
       el: '#mvvm',
       data: {
-        title: 'Jay',
+        title: '无始大帝',
         a: {
-          b: 1,
+          b: '无始钟',
           e: {}
         },
-        d: ['ddd', 'dddd'],
+        d: ['狠人大帝', '叶天帝'],
       }
     })
     console.log(mvvm)
     setTimeout(() => {
-      mvvm.data.title = 'lizz'
-      mvvm.data.a.b = 'bbbbbb'
-      mvvm.data.c = 'cccccc'
-      mvvm.data.a.e.f = 'bbbccc'
-    }, 1500)
+      mvvm.data.title = '无始天帝'
+      mvvm.data.a.b = '无始帝钟'
+      mvvm.data.c = '黑皇'
+      mvvm.data.a.e.f = '无始帝经'
+    }, 2000)
   </script>
 </body>
 </html>

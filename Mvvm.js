@@ -18,12 +18,20 @@
  * 4. cloneNode：https://developer.mozilla.org/zh-CN/docs/Web/API/Node/cloneNode ， 新规范有所更改，不传deep默认不拷贝后代元素
  * 5. Node.nodeType：https://developer.mozilla.org/zh-CN/docs/Web/API/Node/nodeType
  * 6. RegExp.$1-$9：https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/RegExp/n
+ * 7. replace：https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/String/replace#%E6%8C%87%E5%AE%9A%E4%B8%80%E4%B8%AA%E5%87%BD%E6%95%B0%E4%BD%9C%E4%B8%BA%E5%8F%82%E6%95%B0
+ * 8. Element.attributes：https://developer.mozilla.org/zh-CN/docs/Web/API/Element/attributes
  * 
  * 
  * 注意点：
  * 1. proxy代理数组对象时，set必须返回 true，不然使用数组api会报错
  *    见：https://developer.mozilla.org/zh-CN/docs/Web/JavaScript/Reference/Global_Objects/Proxy/handler/set
  * 2. 模板中变量用 {{}} 来包裹，正则也只判断 {{}} 中的变量并渲染
+ * 3. 文本如果是 文字 + {{变量}} 形式，应该用 replace 来替换！！！
+ * 4. 使用 Dep + Watcher 联合组成发布订阅，只有实例化 Watcher 时，才会添加订阅
+ * 5. replace + reduce 进行替换，代码非常简洁优美
+ * 6. node替换时，通过 this.mvvm.initMounted 仅在初始化时实例化Watcher，以后更新时不用实例化，减少性能损耗，
+ *    尤其双向绑定时，没有这个限制的话，卡死了！！！
+ *    嗯，我踩的坑，难怪我一开始不明白人家的代码为何要有这个，还是实际敲才有用
  */
 
 
@@ -361,13 +369,13 @@ class Compiler3 {
     while (child = this.mvvm.$el.firstChild) {
       fragment.appendChild(child);
     }
-    this.replcae(fragment);
+    this.replace(fragment);
     this.mvvm.$el.appendChild(fragment);
   }
-  replcae (dom) {
+  replace (dom) {
     let reg = /\{\{(.*?)\}\}/;
     Array.from(dom.childNodes).forEach(node => {
-      if (node.nodeType === 1 && reg.test(node.textContent)) {
+      if (node.nodeType === 3 && reg.test(node.textContent)) {
         let key = RegExp.$1;
         // 添加订阅
         this.dep.add({type: key, node: node, fn: (node, val) => node.textContent = val })
@@ -401,6 +409,10 @@ class Compiler3 {
         }
         node.textContent = val;
       }
+      // 如果还有子节点，继续递归replace
+      if (node.childNodes && node.childNodes.length) {
+        this.replace(node);
+      }
     })
   }
 }
@@ -420,15 +432,175 @@ class Mvvm3 {
 
 
 /**
- * @description 附上以上文章的源码，他们跟vue一样，采用Dep和Watch两个联合构建发布订阅
+ * @description 在网上代码基础上修改，他们代码跟vue一样，采用 Dep 和 Watcher 两个联合构建发布订阅
+ * 
  * 我理解的好处在于：
- * 1. 需要更新时，直接通过Dep.target对应的this就能对相应的node进行更新
- *    不需要像我这样，弄个 type， 根据 type 去比对更新。
- *    我需要根据 type 去获取该更新谁，所以我不得不在 Compiler 的 replace 里面去拿到type，然后不断传递
- * 2. 事实上，真正的库，例如 vue，我们是可以在 template 中多处使用同一个变量的，但是我这里不行，没有实现
- * 3. 还有个最最最重要的好处，我写的实在太low逼，需要递归，判断，但是人家通过Dep.target直接限制死了，操，真的好！！！
- * 4. 我双向绑定和计算属性还没有实现。
+ * 1. 需要更新时，全部更新，不需要像我这样，弄个 type， 根据 type 去比对更新。这样同一个变量即使用在不同地方，也能都获得更新
+ *    而我需要根据 type 去获取该更新谁，所以我不得不在 Compiler 的 replace 里面去拿到type，然后不断传递，
+ *    同时，同一个变量用在多处时，我只能更新 第一处的 node，很明显这是错误的思路！！！
+ * 2. 还有个最最最重要的好处，我写的实在太low逼，需要递归，判断，但是人家通过Dep.target防止重复添加订阅，直接限制死了，操，真的好！！！
+ * 3. 我双向绑定和计算属性还没有实现。
+ * 4. 我犯了个大错，是直接对 textContent 赋值，我忽略了<span>啊啊啊啊{{title}}</span> 这种情况，这样的话 “啊啊啊啊” 就会丢失
+ *    难怪不明白为何网上 为何用的是 replace，思维不严谨！！！
+ * 5. 不明白网上代码判断的是 nodeType === 3，我用了nodeType === 1，仔细看了他们的代码，发现 nodeType === 1 下其实包含 nodeType === 3
+ *    需要对 nodeType === 1 的 node 继续递归调用
+ * 6. 网上代码有个最大的优点，他把所有嵌套的属性对象全部代理到Mvvm实例上，这样只需要直接改变实例上的对应属性，就能监听改变
+ *    操！真TM机智！！！
  * 
  * 以上主要是我自己的代码实践，毕竟直接看总会误以为自己懂了，实际上，我什么都不懂。
  * 如果真的靠看看就懂了，我TM早就上清华了。
  */
+
+class Dep {
+  constructor () {
+    this.subs = [];
+  }
+  add (sub) {
+    this.subs.push(sub);
+  }
+  notify () {
+    this.subs.forEach(sub => sub.update());
+  }
+}
+
+class Watcher {
+  constructor (data, exp, fn) { // 假设 {{a.e.f}}， exp 是 {{a.e.f}} 中匹配到的 a.e.f
+    this.data = data;
+    this.exp = exp;
+    this.fn = fn;
+    Dep.target = this; // 这很重要！
+    let arr = exp.split('.');
+    let val = data;
+    // 获取最终对应的值；假设 {{a.e.f}}，这里要拿到 a.e.f 对应的值
+    // 这里的 val = val[key] 涉及了 get 和 set，
+    // 尤其是 get 时，这里设置了 Dep.target
+    arr.forEach(key => val = val[key]);
+    // 这里设为 null 是为了不影响其他地方的 get，set
+    // 确保只有 node 编译时才会添加 订阅
+    Dep.target = null;
+  }
+  update () {
+    let arr = this.exp.split('.');
+    let val = this.data;
+    arr.forEach(key => val = val[key]);
+    // console.log(arr, val)
+    this.fn(val);   // 将每次拿到的新值去替换{{}}的内容即可
+  }
+}
+
+class Observe {
+  constructor (data, dep) {
+    this.data = data;
+    this.dep = dep;
+    return this.proxy();
+  }
+  proxy () {
+    let dep = this.dep;
+    return new Proxy(this.data, {
+      get (target, key) {
+        Dep.target && dep.add(Dep.target); // 将Watcher添加到订阅事件中 [watcher]；只有实例化Watcher时才会添加订阅
+        return observe(target[key], dep) || target[key]; // 存在嵌套情况，需要对嵌套的对象也进行代理拦截
+      },
+      set (target, key, value) {
+        if (target[key] === value) {
+          return;
+        }
+        target[key] = observe(value, dep) || value; // 监听新值
+        dep.notify(); // 让所有Watcher的update方法执行即可
+        return true;
+      }
+    })
+  }
+}
+
+const observe = (data, dep) => {
+  if (!data || typeof data !== 'object') { // 排除null和非对象
+    return;
+  }
+  return new Observe(data, dep);
+}
+
+class Compiler {
+  constructor (mvvm) {
+    this.mvvm = mvvm;
+    this.mvvm.$el = document.querySelector(this.mvvm.el);
+    this.fragment = document.createDocumentFragment();
+    let child;
+    while (child = this.mvvm.$el.firstChild) {
+      this.fragment.appendChild(child);
+    }
+    this.render();
+  }
+  render () {
+    this.replace(this.fragment);
+    this.mvvm.$el.appendChild(this.fragment);
+  }
+  replace (dom) {
+    let reg = /\{\{(.*?)\}\}/;
+    Array.from(dom.childNodes).forEach(node => {
+      if (node.nodeType === 3 && reg.test(node.textContent)) {
+        let txt = node.textContent; // 例如 啊啊啊{{title}}
+        const replaceText = () => {
+          node.textContent = txt.replace(reg, (match, p1) => { // 使用 replace + reduce 配合替换，代码真完美
+            // console.log(txt)
+            // 通过 this.mvvm.initMounted 初次挂在后，以后更新node不再实例化Watcher，
+            // 优化性能，不然双向绑定输入时卡死了！！！
+            this.mvvm.initMounted || new Watcher(this.mvvm.data, p1, replaceText);
+            // 由于一开始 this.mvvm.data = observe(this.mvvm.data, new Dep())
+            // 此时 this.mvvm.data 均被Proxy代理了
+            // 这里 val = val[key] 同时涉及了 get 和 set 操作
+            // 如果上面不实例化 Watcher，那么不会订阅任何对象
+            return p1.split('.').reduce((val, key) => val = val[key] || '', this.mvvm.data);
+          });
+        }
+        replaceText();
+        // node.textContent = txt.replace(reg, (match, p1) => { // 使用 replace + reduce 配合替换，代码真完美
+        //   new Watcher(this.mvvm.data, p1, (newVal) => { // 这里实例化 Watcher
+        //     node.textContent = txt.replace(reg, (match, p1) => {
+        //       return newVal;
+        //     });
+        //   })
+        //   // 由于一开始 this.mvvm.data = observe(this.mvvm.data, new Dep())
+        //   // 此时 this.mvvm.data 均被Proxy代理了
+        //   // 这里 val = val[key] 同时涉及了 get 和 set 操作
+        //   // 如果上面不实例化 Watcher，那么不会订阅任何对象
+        //   return p1.split('.').reduce((val, key) => val = val[key] || '', this.mvvm.data);
+        // });
+      }
+      if (node.nodeType === 1) { // v-model 双向绑定
+        let nodeAttr = node.attributes;
+        Array.from(nodeAttr).forEach(attr => {
+          // 举例 [Attr对象, Attr对象]
+          // console.log(Array.from(nodeAttr), attr)
+          let name = attr.name; // type  v-model  与value一一对应
+          let exp = attr.value; // text  title
+          if (name === 'v-model') {
+            node.value = this.mvvm.data[exp];
+          }
+          // 这里实例化 Watcher，将该input也添加订阅，用于更新
+          new Watcher(this.mvvm.data, exp, (newVal) =>  node.value = newVal);
+          node.addEventListener('input', e => {
+            if (name !== 'v-model') {
+              return;
+            }
+            let newVal = e.target.value;
+            this.mvvm.data[exp] = newVal;
+          })
+        })
+      }
+      if (node.childNodes && node.childNodes.length) { // 如果还有子节点，继续递归replace
+        this.replace(node);
+      }
+    })
+  }
+}
+
+class Mvvm {
+  constructor (mvvm) {
+    this.mvvm = mvvm;
+    this.mvvm.data = observe(this.mvvm.data, new Dep());
+    new Compiler(this.mvvm);
+    this.mvvm.initMounted = true;
+    return this.mvvm;
+  }
+}
