@@ -32,6 +32,9 @@
  * 6. node替换时，通过 this.mvvm.initMounted 仅在初始化时实例化Watcher，以后更新时不用实例化，减少性能损耗，
  *    尤其双向绑定时，没有这个限制的话，卡死了！！！
  *    嗯，我踩的坑，难怪我一开始不明白人家的代码为何要有这个，还是实际敲才有用
+ * 7. v-model 绑定的输入框，输入中文时，输入不了，且第一个字母会出现两个。
+ *    经过不断调试，发现有个 Watcher 里的 exp 是 text，这个是v-model输入框才有的，仔细看了下代码，
+ *    我没有把 new Watcher 放在 if (name === 'v-model') {} 里面。。。。。。
  */
 
 
@@ -483,7 +486,6 @@ class Watcher {
     let arr = this.exp.split('.');
     let val = this.data;
     arr.forEach(key => val = val[key]);
-    // console.log(arr, val)
     this.fn(val);   // 将每次拿到的新值去替换{{}}的内容即可
   }
 }
@@ -503,7 +505,7 @@ class Observe {
       },
       set (target, key, value) {
         if (target[key] === value) {
-          return;
+          return true;
         }
         target[key] = observe(value, dep) || value; // 监听新值
         dep.notify(); // 让所有Watcher的update方法执行即可
@@ -536,36 +538,25 @@ class Compiler {
     this.mvvm.$el.appendChild(this.fragment);
   }
   replace (dom) {
-    let reg = /\{\{(.*?)\}\}/;
+    let reg = /\{\{(.*?)\}\}/g;
     Array.from(dom.childNodes).forEach(node => {
       if (node.nodeType === 3 && reg.test(node.textContent)) {
         let txt = node.textContent; // 例如 啊啊啊{{title}}
         const replaceText = () => {
           node.textContent = txt.replace(reg, (match, p1) => { // 使用 replace + reduce 配合替换，代码真完美
             // console.log(txt)
+            // console.log(',,,,,,,,,', p1)
             // 通过 this.mvvm.initMounted 初次挂在后，以后更新node不再实例化Watcher，
             // 优化性能，不然双向绑定输入时卡死了！！！
             this.mvvm.initMounted || new Watcher(this.mvvm.data, p1, replaceText);
             // 由于一开始 this.mvvm.data = observe(this.mvvm.data, new Dep())
             // 此时 this.mvvm.data 均被Proxy代理了
-            // 这里 val = val[key] 同时涉及了 get 和 set 操作
+            // 这里 val[key] 涉及了 get 操作
             // 如果上面不实例化 Watcher，那么不会订阅任何对象
-            return p1.split('.').reduce((val, key) => val = val[key] || '', this.mvvm.data);
+            return p1.split('.').reduce((val, key) => val[key] || '', this.mvvm.data);
           });
         }
         replaceText();
-        // node.textContent = txt.replace(reg, (match, p1) => { // 使用 replace + reduce 配合替换，代码真完美
-        //   new Watcher(this.mvvm.data, p1, (newVal) => { // 这里实例化 Watcher
-        //     node.textContent = txt.replace(reg, (match, p1) => {
-        //       return newVal;
-        //     });
-        //   })
-        //   // 由于一开始 this.mvvm.data = observe(this.mvvm.data, new Dep())
-        //   // 此时 this.mvvm.data 均被Proxy代理了
-        //   // 这里 val = val[key] 同时涉及了 get 和 set 操作
-        //   // 如果上面不实例化 Watcher，那么不会订阅任何对象
-        //   return p1.split('.').reduce((val, key) => val = val[key] || '', this.mvvm.data);
-        // });
       }
       if (node.nodeType === 1) { // v-model 双向绑定
         let nodeAttr = node.attributes;
@@ -576,16 +567,16 @@ class Compiler {
           let exp = attr.value; // text  title
           if (name === 'v-model') {
             node.value = this.mvvm.data[exp];
+            // 这里实例化 Watcher，将该input也添加订阅，用于更新
+            new Watcher(this.mvvm.data, exp, (newVal) =>  node.value = newVal);
+            node.addEventListener('input', e => {
+              if (name !== 'v-model') {
+                return;
+              }
+              let newVal = e.target.value;
+              this.mvvm.data[exp] = newVal;
+            })
           }
-          // 这里实例化 Watcher，将该input也添加订阅，用于更新
-          new Watcher(this.mvvm.data, exp, (newVal) =>  node.value = newVal);
-          node.addEventListener('input', e => {
-            if (name !== 'v-model') {
-              return;
-            }
-            let newVal = e.target.value;
-            this.mvvm.data[exp] = newVal;
-          })
         })
       }
       if (node.childNodes && node.childNodes.length) { // 如果还有子节点，继续递归replace
