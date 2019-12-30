@@ -490,6 +490,9 @@ class Watcher {
   }
 }
 
+/**
+ * @see 注意：不能在get内部去递归调用observe，因为这样会不断实例化新的Observer
+ */
 class Observe {
   constructor (data, dep) {
     this.data = data;
