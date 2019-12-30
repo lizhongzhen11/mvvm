@@ -494,6 +494,9 @@ class Observe {
   constructor (data, dep) {
     this.data = data;
     this.dep = dep;
+    Object.keys(this.data).forEach(key => {
+      this.data[key] = observe(this.data[key], dep) // 存在嵌套情况，需要对嵌套的对象也进行代理拦截
+    })
     return this.proxy();
   }
   proxy () {
@@ -501,13 +504,13 @@ class Observe {
     return new Proxy(this.data, {
       get (target, key) {
         Dep.target && dep.add(Dep.target); // 将Watcher添加到订阅事件中 [watcher]；只有实例化Watcher时才会添加订阅
-        return observe(target[key], dep) || target[key]; // 存在嵌套情况，需要对嵌套的对象也进行代理拦截
+        return target[key];
       },
       set (target, key, value) {
         if (target[key] === value) {
           return true;
         }
-        target[key] = observe(value, dep) || value; // 监听新值
+        target[key] = observe(value, dep); // 监听新值
         dep.notify(); // 让所有Watcher的update方法执行即可
         return true;
       }
@@ -517,7 +520,7 @@ class Observe {
 
 const observe = (data, dep) => {
   if (!data || typeof data !== 'object') { // 排除null和非对象
-    return;
+    return data;
   }
   return new Observe(data, dep);
 }
